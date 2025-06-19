@@ -163,7 +163,7 @@ def calculate_metrics(y_true, y_pred):
     mape = np.mean(np.abs((y_true - y_pred) / (y_true + 1e-10))) * 100
     return rmse, mae, mape
 
-def generate_forecast(df, date_col, target_col, horizon, period, five_year_forecast=False):
+def generate_forecast(df, date_col, target_col, horizon, period, five_year_forecast=False, plot_type='line', plot_theme='plotly_white', yearly_seasonality=True, include_holidays=False):
     try:
         freq_map = {'Quarterly': 'Q', 'Half-Yearly': '6M', 'Yearly': 'Y'}
         freq = freq_map[period]
@@ -180,7 +180,14 @@ def generate_forecast(df, date_col, target_col, horizon, period, five_year_forec
         st.write(f"Train size: {len(train)}, Test size: {len(test)}")
         st.write(f"Test date range: {test['ds'].min()} to {test['ds'].max()}")
 
-        model = Prophet(yearly_seasonality=len(processed_df) >= 4 if freq != 'Y' else False, weekly_seasonality=False, daily_seasonality=False)
+        model = Prophet(
+            yearly_seasonality=yearly_seasonality and len(processed_df) >= 4 if freq != 'Y' else False,
+            weekly_seasonality=False,
+            daily_seasonality=False
+        )
+        if include_holidays:
+            model.add_country_holidays(country_name='US')  # Adjust country as needed
+            st.write("Added US holidays to model")
         model.fit(train)
         horizon = 20 if five_year_forecast and period == 'Quarterly' else 10 if five_year_forecast and period == 'Half-Yearly' else 5 if five_year_forecast and period == 'Yearly' else horizon
         future = model.make_future_dataframe(periods=horizon, freq=freq)
@@ -206,15 +213,20 @@ def generate_forecast(df, date_col, target_col, horizon, period, five_year_forec
             return
         st.write(f"Future forecast rows: {len(future_forecast)}")
         fig1 = go.Figure()
-        fig1.add_trace(go.Scatter(x=processed_df['ds'], y=processed_df['y'], mode='lines', name='Historical', line=dict(color='blue')))
-        fig1.add_trace(go.Scatter(x=future_forecast['ds'], y=future_forecast['yhat'], mode='lines', name='Future Forecast', line=dict(color='red')))
-        fig1.add_trace(go.Scatter(x=future_forecast['ds'], y=future_forecast['yhat_upper'], fill=None, mode='lines', line_color='rgba(255,0,0,0.2)', name='Upper CI'))
-        fig1.add_trace(go.Scatter(x=future_forecast['ds'], y=future_forecast['yhat_lower'], fill='tonexty', mode='lines', line_color='rgba(255,0,0,0.2)', name='Lower CI'))
+        if plot_type == 'line':
+            fig1.add_trace(go.Scatter(x=processed_df['ds'], y=processed_df['y'], mode='lines', name='Historical', line=dict(color='blue')))
+            fig1.add_trace(go.Scatter(x=future_forecast['ds'], y=future_forecast['yhat'], mode='lines', name='Future Forecast', line=dict(color='red')))
+            fig1.add_trace(go.Scatter(x=future_forecast['ds'], y=future_forecast['yhat_upper'], fill=None, mode='lines', line_color='rgba(255,0,0,0.2)', name='Upper CI'))
+            fig1.add_trace(go.Scatter(x=future_forecast['ds'], y=future_forecast['yhat_lower'], fill='tonexty', mode='lines', line_color='rgba(255,0,0,0.2)', name='Lower CI'))
+        else:
+            fig1.add_trace(go.Bar(x=processed_df['ds'], y=processed_df['y'], name='Historical', marker_color='blue'))
+            fig1.add_trace(go.Bar(x=future_forecast['ds'], y=future_forecast['yhat'], name='Future Forecast', marker_color='red'))
         fig1.update_layout(
             title=f"Future {period} Trend Forecast for Next {horizon} Periods {'(5 Years)' if five_year_forecast else ''}",
             xaxis_title="Date",
             yaxis_title=target_col,
-            template="plotly_white"
+            template=plot_theme,
+            hovermode='x unified'
         )
         st.plotly_chart(fig1, use_container_width=True)
 
@@ -231,35 +243,44 @@ def generate_forecast(df, date_col, target_col, horizon, period, five_year_forec
             title=f"Mean Forecast per {period} Period {'(5 Years)' if five_year_forecast else ''}",
             xaxis_title="Period",
             yaxis_title=target_col,
-            template="plotly_white"
+            template=plot_theme
         )
         st.plotly_chart(fig_bar, use_container_width=True)
 
         st.subheader(f"Full {period} Forecast with Historical Data")
         fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(x=train['ds'], y=train['y'], mode='lines', name='Train'))
-        fig2.add_trace(go.Scatter(x=test['ds'], y=test['y'], mode='lines', name='Test'))
-        fig2.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='Forecast'))
-        fig2.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_upper'], fill=None, mode='lines', line_color='rgba(0,100,80,0.2)', name='Upper CI'))
-        fig2.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_lower'], fill='tonexty', mode='lines', line_color='rgba(0,100,80,0.2)', name='Lower CI'))
+        if plot_type == 'line':
+            fig2.add_trace(go.Scatter(x=train['ds'], y=train['y'], mode='lines', name='Train'))
+            fig2.add_trace(go.Scatter(x=test['ds'], y=test['y'], mode='lines', name='Test'))
+            fig2.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='Forecast'))
+            fig2.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_upper'], fill=None, mode='lines', line_color='rgba(0,100,80,0.2)', name='Upper CI'))
+            fig2.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_lower'], fill='tonexty', mode='lines', line_color='rgba(0,100,80,0.2)', name='Lower CI'))
+        else:
+            fig2.add_trace(go.Bar(x=train['ds'], y=train['y'], name='Train'))
+            fig2.add_trace(go.Bar(x=test['ds'], y=test['y'], name='Test'))
+            fig2.add_trace(go.Bar(x=forecast['ds'], y=forecast['yhat'], name='Forecast'))
         fig2.update_layout(
             title=f"Full {period} Forecast (RMSE: {rmse if rmse else 'N/A'}, MAE: {mae if mae else 'N/A'}, MAPE: {mape if mape else 'N/A'}%)",
             xaxis_title="Date",
             yaxis_title=target_col,
-            template="plotly_white"
+            template=plot_theme,
+            hovermode='x unified'
         )
         st.plotly_chart(fig2, use_container_width=True)
 
         st.subheader("Trend Components")
         fig4 = go.Figure()
         fig4.add_trace(go.Scatter(x=forecast['ds'], y=forecast['trend'], mode='lines', name='Trend'))
-        if len(processed_df) >= 4 and freq != 'Y':
+        if yearly_seasonality and len(processed_df) >= 4 and freq != 'Y':
             fig4.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yearly'], mode='lines', name='Yearly Seasonality'))
+        if include_holidays:
+            if 'holidays' in forecast.columns:
+                fig4.add_trace(go.Scatter(x=forecast['ds'], y=forecast['holidays'], mode='lines', name='Holidays'))
         fig4.update_layout(
             title="Trend and Seasonality Components",
             xaxis_title="Date",
             yaxis_title="Value",
-            template="plotly_white"
+            template=plot_theme
         )
         st.plotly_chart(fig4, use_container_width=True)
 
@@ -285,6 +306,10 @@ def main():
         max_horizon = 4 if period == "Quarterly" else 4 if period == "Half-Yearly" else 2
         horizon = st.number_input(f"Forecast Horizon ({period.lower()} periods)", min_value=1, max_value=max_horizon, value=2)
         five_year_forecast = st.checkbox("Show 5-Year Forecast", value=False)
+        plot_type = st.selectbox("Plot Type", ["Line", "Bar"], index=0)
+        plot_theme = st.selectbox("Plot Theme", ["plotly_white", "plotly_dark"], index=0)
+        yearly_seasonality = st.checkbox("Include Yearly Seasonality", value=True)
+        include_holidays = st.checkbox("Include US Holidays", value=False)
 
     uploaded_file = st.file_uploader("Upload CSV", type=["csv"], help="Files >10 MB may fail on Streamlit Cloud.", on_change=clear_cache)
 
@@ -311,7 +336,7 @@ def main():
             st.header(f"Future {period} Trend Forecasting")
             if st.button("Generate Forecast"):
                 with st.spinner("Generating forecast..."):
-                    generate_forecast(df, date_col, target_col, horizon, period, five_year_forecast)
+                    generate_forecast(df, date_col, target_col, horizon, period, five_year_forecast, plot_type.lower(), plot_theme, yearly_seasonality, include_holidays)
         else:
             st.error("Failed to load CSV. Check format or share sample content.")
 
